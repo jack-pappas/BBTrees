@@ -98,16 +98,16 @@ module Set =
 
     (*fun N(v,l,r) = T(v,1+size(l)+size(r),l,r)*)
     //
-    let private N (v : 'T, l, r) : Set<'T> =
+    let private N (value : 'T, l, r) : Set<'T> =
         match l, r with
         | E, E ->
-            T (v, 1, E, E)
+            T (value, 1, E, E)
         | E, (T (_,n,_,_) as r) ->
-            T (v, n+1, E, r)
+            T (value, n+1, E, r)
         | (T (_,n,_,_) as l), E ->
-            T (v, n+1, l, E)
+            T (value, n+1, l, E)
         | (T (_,n,_,_) as l), (T (_,m,_,_) as r) ->
-            T (v, n+m+1, l, r)
+            T (value, n+m+1, l, r)
 
     //
     let inline private single_L (a, x, T(b,_,y,z)) =
@@ -126,47 +126,47 @@ module Set =
         N (b, N (a,w,x), N (c,y,z))
 
     //
-    let private T' (v : 'T, l, r) : Set<'T> =
+    let private T' (value : 'T, l, r) : Set<'T> =
         match l, r with
         | E, E ->
-            T (v, 1, E, E)
+            T (value, 1, E, E)
         | E, T (_,_,E,E) ->
-            T (v, 2, E, r)
+            T (value, 2, E, r)
         | T (_,_,E,E), E ->
-            T (v, 2, l, E)
+            T (value, 2, l, E)
         | E, T (_,_, T(_,_,_,_), E) ->
-            double_L (v, l, r)
+            double_L (value, l, r)
         | T (_,_, E, T(_,_,_,_)), E ->
-            double_R (v, l, r)
+            double_R (value, l, r)
 
         (* these cases almost never happen with small weight *)
         | E, T (_,_, T(_,ln,_,_), T(_,rn,_,_)) ->
-            if ln < rn then single_L (v, l, r)
-            else double_L (v, l, r)
+            if ln < rn then single_L (value, l, r)
+            else double_L (value, l, r)
 
         | T (_,_, T(_,ln,_,_), T(_,rn,_,_)), E ->
-            if ln > rn then single_R (v, l, r)
-            else double_R (v, l, r)
+            if ln > rn then single_R (value, l, r)
+            else double_R (value, l, r)
 
         | E, T (_,_,E,_) ->
-            single_L (v, l, r)
+            single_L (value, l, r)
         | T (_,_,_,E), E ->
-            single_R (v, l, r)
+            single_R (value, l, r)
 
         | T (lv, ln, ll, lr), T (rv, rn, rl, rr) ->
             if rn >= weight * ln then (*right is too big*)
                 if size rl < size rr then
-                    single_L (v, l, r)
+                    single_L (value, l, r)
                 else
-                    double_L (v, l, r)
+                    double_L (value, l, r)
             
             elif ln >= weight * rn then  (*left is too big*)
                 if size lr < size ll then
-                    single_R (v, l, r)
+                    single_R (value, l, r)
                 else
-                    double_R (v, l, r)
+                    double_R (value, l, r)
             else
-                T (v, ln+rn+1, l, r)
+                T (value, ln+rn+1, l, r)
 
     //
     let rec add (set, x) : Set<'T> =
@@ -181,24 +181,25 @@ module Set =
             else set
 
     //
-    let rec private concat3 (l, v, r) : Set<'T> =
+    let rec private concat3 (l, value, r) : Set<'T> =
         match l, r with
         | E, r ->
-            add (r, v)
+            add (r, value)
         | l, E ->
-            add (l, v)
+            add (l, value)
         | T (v1, n1, l1, r1), T (v2, n2, l2, r2) ->
             if weight * n1 < n2 then
-                T' (v2, concat3 (l, v, l2), r2)
+                T' (v2, concat3 (l, value, l2), r2)
             elif weight * n2 < n1 then
-                T' (v1, l1, concat3 (r1, v, r))
+                T' (v1, l1, concat3 (r1, value, r))
             else
-                N (v, l, r)
+                N (value, l, r)
 
     //
-    let rec private split_lt = function
-        | (E, x) -> E
-        | ((T (v, _, l, r) as t), x) ->
+    let rec private split_lt (set, x) =
+        match set with
+        | E -> E
+        | T (v, _, l, r) ->
             if lt (x, v) then
                 split_lt (l, x)
             elif lt (v, x) then
@@ -206,9 +207,10 @@ module Set =
             else l
 
     //
-    let rec private split_gt = function
-        | (E, x) -> E
-        | ((T (v, _, l, r) as t), x) ->
+    let rec private split_gt (set, x) =
+        match set with
+        | E -> E
+        | T (v, _, l, r) ->
             if lt (v, x) then
                 split_gt (r, x)
             elif lt (x, v) then
@@ -221,32 +223,37 @@ module Set =
         | T (v, _, l, _) -> min l
 
     //
-    let rec private delete' = function
-        | (E, r) -> r
-        | (l, E) -> l
-        | (l, r) ->
+    let rec private delete' (l, r) =
+        match l, r with
+        | E, r -> r
+        | l, E -> l
+        | l, r ->
             T' (min r, l, delmin r)
 
     //
-    and private delmin = function
+    and private delmin (set : Set<'T>) =
+        match set with
+        | E ->
+            invalidArg "set" "The set is empty."
         | T (_, _, E, r) -> r
         | T (v, _, l, r) ->
             T' (v, delmin l, r)
 
     //
-    let rec private concat = function
-        | (E, s2) -> s2
-        | (s1, E) -> s1
-        | ((T (v1, n1, l1, r1) as t1), (T (v2, n2, l2, r2) as t2)) ->
+    let rec private concat (s1, s2) : Set<'T> =
+        match s1, s2 with
+        | E, s2 -> s2
+        | s1, E -> s1
+        | T (v1, n1, l1, r1), T (v2, n2, l2, r2) ->
             if weight * n1 < n2 then
-                T' (v2, concat (t1, l2), r2)
+                T' (v2, concat (s1, l2), r2)
             elif weight * n2 < n1 then
-                T' (v1, l1, concat (r1, t2))
+                T' (v1, l1, concat (r1, s2))
             else
-                T' (min t2, t1, delmin t2)
+                T' (min s2, s1, delmin s2)
 
     //
-    let private fold (f, state, set) =
+    let private fold (f, state, set : Set<'T>) =
         let rec fold' (state, set) =
             match set with
             | E -> state
@@ -261,29 +268,30 @@ module Set =
     let empty<'T when 'T : comparison> : Set<'T> = E
 
     //
-    let singleton x = T (x, 1, E, E)
+    let singleton x : Set<'T> =
+        T (x, 1, E, E)
 
     //
-    let rec private trim = function
-        | (lo, hi, E) -> E
-        | (lo, hi, (T(v,_,l,r) as s)) ->
+    let rec private trim (lo, hi, s) : Set<'T> =
+        match s with
+        | E -> E
+        | T (v, _, l, r) ->
             if lt (lo, v) then
                 if lt (v, hi) then s
                 else trim (lo, hi, l)
             else trim (lo, hi, r)
 
     //
-    let rec private uni_bd = function
-        | (s1, E, lo, hi) ->
-            s1 : Set<'T>
-
-        | (E, T(v,_,l,r), lo, hi) -> 
+    let rec private uni_bd (s1, s2, lo, hi) : Set<'T> =
+        match s1, s2 with
+        | s1, E -> s1
+        | E, T (v, _, l, r) -> 
             concat3 (
                 split_gt (l, lo),
                 v,
                 split_lt (r, hi))
 
-        | (T (v, _, l1, r1), (T (v2, _, l2, r2) as s2), lo, hi) ->
+        | T (v, _, l1, r1), T (v2, _, l2, r2) ->
             concat3(
                 uni_bd (l1, trim (lo, v, s2), lo, v),
                 v, 
@@ -295,56 +303,62 @@ module Set =
                lo=-infinity and/or hi=+infinity *)
 
     //
-    let rec private trim_lo = function
-        | (_, E) -> E
-        | (lo, (T (v, _, _, r) as s)) ->
-            if lt (lo, v) then s
+    let rec private trim_lo (lo, set) : Set<'T> =
+        match set with
+        | E -> E
+        | T (v, _, _, r) ->
+            if lt (lo, v) then set
             else trim_lo (lo, r)
 
     //
-    let rec private trim_hi = function
-        | (_, E) -> E
-        | (hi, (T (v, _, l, _) as s)) ->
-            if lt (v, hi) then s
+    let rec private trim_hi (hi, set) : Set<'T> =
+        match set with
+        | E -> E
+        | T (v, _, l, _) ->
+            if lt (v, hi) then set
             else trim_hi (hi, l)
 
     //
-    let rec private uni_hi = function
-        | (s, E, hi) -> s
-        | (E, T (v, _, l, r), hi) ->
+    let rec private uni_hi (s1, s2, hi) : Set<'T> =
+        match s1, s2 with
+        | s1, E -> s1
+        | E, T (v, _, l, r) ->
             concat3 (l, v, split_lt (r, hi))
-        | (T (v, _, l1, r1), (T (v2, _, l2, r2) as s2), hi) ->
+        | T (v, _, l1, r1), T (v2, _, l2, r2) ->
             concat3(
                 uni_hi (l1, trim_hi (v, s2), v),
                 v, 
                 uni_bd (r1, trim (v, hi, s2), v, hi))
 
     //
-    let rec private uni_lo = function
-        | (s, E, lo) -> s
-        | (E, T (v, _, l, r), lo) ->
+    let rec private uni_lo (s1, s2, lo) : Set<'T> =
+        match s1, s2 with
+        | s1, E -> s1
+        | E, T (v, _, l, r) ->
             concat3 (split_gt (l, lo), v, r)
-        | (T (v, _, l1, r1), (T (v2, _, l2, r2) as s2), lo) ->
+        | T (v, _, l1, r1), T (v2, _, l2, r2) ->
             concat3(
                 uni_bd (l1, trim (lo, v, s2), lo, v),
                 v, 
                 uni_lo (r1, trim_lo (v, s2), v))
 
     //
-    let hedge_union = function
-        | (s1, E) -> s1
-        | (E, (T (v, _, l, r) as s2)) -> s2
-        | (T (v, _, l1, r1), (T (v2, _, l2, r2) as s2)) ->
+    let hedge_union (s1, s2) : Set<'T> =
+        match s1, s2 with
+        | s1, E -> s1
+        | E, T (_,_,_,_) -> s2
+        | T (v, _, l1, r1), T (v2, _, l2, r2) ->
             concat3(
                 uni_hi (l1, trim_hi (v, s2), v),
                 v, 
                 uni_lo (r1, trim_lo (v, s2), v))
 
     //
-    let rec old_union = function
-        | (E, s2) -> s2
-        | (s1, E) -> s1
-        | ((T (v, _, l, r) as s1), s2) ->
+    let rec old_union (s1, s2) : Set<'T> =
+        match s1, s2 with
+        | E, s2 -> s2
+        | s1, E -> s1
+        | T (v, _, l, r), s2 ->
             let l2 = split_lt (s2, v)
             let r2 = split_gt (s2, v)
             concat3(
@@ -354,13 +368,14 @@ module Set =
 
     (* The old_union version is about 20% slower than hedge_union in most cases *)
     //let inline union (s1, s2) = old_union(s1, s2)
-    let inline union (s1, s2) = hedge_union(s1, s2)
+    let inline union (s1, s2) : Set<'T> = hedge_union(s1, s2)
 
     //
-    let rec difference = function
-        | (E,_) -> E
-        | (s1, E) -> s1
-        | (s1, T (v, _, l, r)) ->
+    let rec difference (s1, s2) : Set<'T> =
+        match s1, s2 with
+        | E, _ -> E
+        | s1, E -> s1
+        | s1, T (v, _, l, r) ->
             let l2 = split_lt (s1, v)
             let r2 = split_gt (s1, v)
             concat (
@@ -370,7 +385,7 @@ module Set =
     // NOTE : This function was originally called 'member' but the name
     // was changed since that's a keyword (reserved identifier) in F#.
     //
-    let rec contains (x, set : Set<'T>) =
+    let rec contains (x, set : Set<'T>) : bool =
         match set with
         | E -> false
         | T (v, _, l, r) ->
@@ -381,14 +396,15 @@ module Set =
     (*fun intersection (a,b) = difference(a,difference(a,b))*)
 
     //
-    let rec intersection = function
-        | (E, _) -> E
-        | (_, E) -> E
-        | (s, T (v, _, l, r)) ->
-            let l2 = split_lt (s, v)
-            let r2 = split_gt (s, v)
+    let rec intersection (s1, s2) : Set<'T> =
+        match s1, s2 with
+        | E, _ -> E
+        | _, E -> E
+        | s1, T (v, _, l, r) ->
+            let l2 = split_lt (s1, v)
+            let r2 = split_gt (s1, v)
         
-            if contains (v, s) then
+            if contains (v, s1) then
                 concat3 (
                     intersection (l2, l),
                     v,
@@ -399,9 +415,10 @@ module Set =
                     intersection (r2, r))
 
     //
-    let rec delete = function
-        | (E, x) -> E
-        | ((T(v, _, l, r) as set), x) ->
+    let rec delete (set, x) : Set<'T> =
+        match set with
+        | E -> E
+        | T(v, _, l, r) ->
             if lt (x, v) then
                 T' (v, delete (l, x), r)
             elif lt (v, x) then
@@ -415,6 +432,6 @@ module Set =
     let toList (set : Set<'T>) = fold (cons, [], set)
 
     //
-    let fromList l =
+    let fromList l : Set<'T> =
         (E, l) ||> List.fold (fun x y -> add (x, y))
 
