@@ -81,23 +81,35 @@ type Set<'T when 'T : comparison> =
 //
 [<RequireQualifiedAccess; CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Set =
-    (* Private members *)
+    /// The empty set.
+    let empty<'T when 'T : comparison> : Set<'T> = E
 
-    let inline private lt (x, y) = x < y
+    /// Creates a new set containing the given value.
+    let singleton x : Set<'T> =
+        T (x, 1, E, E)
 
-    //
-    let private size = function
+    /// Returns the number of elements in the set.
+    let count (set : Set<'T>) =
+        match set with
         | E -> 0
-        | T (_:'T,n,_,_) -> n
+        | T (_,n,_,_) -> n
 
-    // TODO : This is the same as 'size' -- can we remove one of them, or
-    // is there some benefit (e.g., abstraction) for keeping both?
-    let cardinality = function
-        | E -> 0
-        | T(_,n,_,_) -> n
+    // NOTE : This function was originally called 'member' but the name
+    // was changed since that's a keyword (reserved identifier) in F#.
+    /// Tests whether the set contains the given value.
+    let rec contains (x, set : Set<'T>) : bool =
+        match set with
+        | E -> false
+        | T (v, _, l, r) ->
+            if x < v then
+                contains (x, l)
+            elif x > v then
+                contains (x, r)
+            else true
 
     (*fun N(v,l,r) = T(v,1+size(l)+size(r),l,r)*)
-    //
+    /// This is the smart constructor for T that ensures that the size of the tree is
+    /// maintained correctly. The tree (v,l,r) must already be balanced.
     let private N (value : 'T, l, r) : Set<'T> =
         match l, r with
         | E, E ->
@@ -109,23 +121,25 @@ module Set =
         | (T (_,n,_,_) as l), (T (_,m,_,_) as r) ->
             T (value, n+m+1, l, r)
 
-    //
+    /// Single left-rotation.
     let inline private single_L (a, x, T(b,_,y,z)) =
         N (b, N (a,x,y), z)
 
-    //
+    /// Single right-rotation.
     let inline private single_R (b, T(a,_,x,y), z) =
         N (a, x, N(b,y,z))
 
-    //
+    /// Double left-rotation.
     let inline private double_L (a, w, T(c,_, T(b,_,x,y), z)) =
         N (b, N(a,w,x), N(c,y,z))
 
-    //
+    /// Double right-rotation.
     let inline private double_R (c, T(a,_,w, T(b,_,x,y)), z) =
         N (b, N (a,w,x), N (c,y,z))
 
-    //
+    /// T' is used when the original tree was in balance and one of l or r has
+    /// changed in size by at most one element, as in insertion or deletion of
+    /// a single element.
     let private T' (value : 'T, l, r) : Set<'T> =
         match l, r with
         | E, E ->
@@ -155,13 +169,13 @@ module Set =
 
         | T (lv, ln, ll, lr), T (rv, rn, rl, rr) ->
             if rn >= weight * ln then (*right is too big*)
-                if size rl < size rr then
+                if count rl < count rr then
                     single_L (value, l, r)
                 else
                     double_L (value, l, r)
             
             elif ln >= weight * rn then  (*left is too big*)
-                if size lr < size ll then
+                if count lr < count ll then
                     single_R (value, l, r)
                 else
                     double_R (value, l, r)
@@ -169,18 +183,58 @@ module Set =
                 T (value, ln+rn+1, l, r)
 
     //
+    let rec private min (set : Set<'T>) =
+        match set with
+        | E ->
+            invalidArg "set" "The set is empty"
+        | T (v, _, E, _) -> v
+        | T (_, _, l, _) -> min l
+
+    //
+    let rec private delete' (l, r) =
+        match l, r with
+        | E, r -> r
+        | l, E -> l
+        | l, r ->
+            T' (min r, l, delmin r)
+
+    //
+    and private delmin (set : Set<'T>) =
+        match set with
+        | E ->
+            invalidArg "set" "The set is empty."
+        | T (_, _, E, r) -> r
+        | T (v, _, l, r) ->
+            T' (v, delmin l, r)
+
+    /// Adds an element to the given set, returning a new set.
+    /// No exception is raised if the set already contains the element.
     let rec add (set, x) : Set<'T> =
         match set with
         | E ->
             T (x, 1, E, E)
         | T (v, _, l, r) ->
-            if lt (x, v) then
+            if x < v then
                 T' (v, add (l, x), r)
-            elif lt (v, x) then
+            elif x > v then
                 T' (v, l, add (r, x))
             else set
 
-    //
+    /// Removes an element from the given set, returning a new set.
+    /// No exception is raised if the set does not contain the element.
+    let rec delete (set, x) : Set<'T> =
+        match set with
+        | E -> E
+        | T(v, _, l, r) ->
+            if x < v then
+                T' (v, delete (l, x), r)
+            elif x > v then
+                T' (v, l, delete (r, x))
+            else
+                delete' (l, r)
+
+    /// concat3 can join trees of arbitrary sizes. As with the other constructors,
+    /// 'value' must be greater than every element in l and less than every element in r.
     let rec private concat3 (l, value, r) : Set<'T> =
         match l, r with
         | E, r ->
@@ -200,9 +254,9 @@ module Set =
         match set with
         | E -> E
         | T (v, _, l, r) ->
-            if lt (x, v) then
+            if x < v then
                 split_lt (l, x)
-            elif lt (v, x) then
+            elif x > v then
                 concat3 (l, v, split_lt (r, x))
             else l
 
@@ -211,33 +265,11 @@ module Set =
         match set with
         | E -> E
         | T (v, _, l, r) ->
-            if lt (v, x) then
+            if v < x then
                 split_gt (r, x)
-            elif lt (x, v) then
+            elif v > x then
                 concat3 (split_gt (l, x), v, r)
             else r
-
-    //
-    let rec private min = function
-        | T (v, _, E, _) -> v
-        | T (v, _, l, _) -> min l
-
-    //
-    let rec private delete' (l, r) =
-        match l, r with
-        | E, r -> r
-        | l, E -> l
-        | l, r ->
-            T' (min r, l, delmin r)
-
-    //
-    and private delmin (set : Set<'T>) =
-        match set with
-        | E ->
-            invalidArg "set" "The set is empty."
-        | T (_, _, E, r) -> r
-        | T (v, _, l, r) ->
-            T' (v, delmin l, r)
 
     //
     let rec private concat (s1, s2) : Set<'T> =
@@ -261,23 +293,13 @@ module Set =
                 fold' (f (v, fold' (state, r)), l)
         fold' (state, set)
 
-    
-    (* Public members *)
-
-    //
-    let empty<'T when 'T : comparison> : Set<'T> = E
-
-    //
-    let singleton x : Set<'T> =
-        T (x, 1, E, E)
-
     //
     let rec private trim (lo, hi, s) : Set<'T> =
         match s with
         | E -> E
         | T (v, _, l, r) ->
-            if lt (lo, v) then
-                if lt (v, hi) then s
+            if lo < v then
+                if v < hi then s
                 else trim (lo, hi, l)
             else trim (lo, hi, r)
 
@@ -307,7 +329,7 @@ module Set =
         match set with
         | E -> E
         | T (v, _, _, r) ->
-            if lt (lo, v) then set
+            if lo < v then set
             else trim_lo (lo, r)
 
     //
@@ -315,7 +337,7 @@ module Set =
         match set with
         | E -> E
         | T (v, _, l, _) ->
-            if lt (v, hi) then set
+            if v < hi then set
             else trim_hi (hi, l)
 
     //
@@ -353,7 +375,7 @@ module Set =
                 v, 
                 uni_lo (r1, trim_lo (v, s2), v))
 
-    //
+    (* The old_union version is about 20% slower than hedge_union in most cases *)
     let rec old_union (s1, s2) : Set<'T> =
         match s1, s2 with
         | E, s2 -> s2
@@ -366,11 +388,12 @@ module Set =
                 v,
                 old_union (r, r2))
 
-    (* The old_union version is about 20% slower than hedge_union in most cases *)
-    //let inline union (s1, s2) = old_union(s1, s2)
-    let inline union (s1, s2) : Set<'T> = hedge_union(s1, s2)
+    /// Computes the union of the two sets.
+    let inline union (s1, s2) : Set<'T> =
+        //old_union (s1, s2)
+        hedge_union (s1, s2)
 
-    //
+    /// Removes the elements of the second set from the first.
     let rec difference (s1, s2) : Set<'T> =
         match s1, s2 with
         | E, _ -> E
@@ -382,20 +405,7 @@ module Set =
                 difference (l2, l),
                 difference (r2, r))
 
-    // NOTE : This function was originally called 'member' but the name
-    // was changed since that's a keyword (reserved identifier) in F#.
-    //
-    let rec contains (x, set : Set<'T>) : bool =
-        match set with
-        | E -> false
-        | T (v, _, l, r) ->
-            if lt (x, v) then contains (x, l)
-            elif lt (v, x) then contains (x, r)
-            else true
-
-    (*fun intersection (a,b) = difference(a,difference(a,b))*)
-
-    //
+    /// Computes the intersection of the two sets.
     let rec intersection (s1, s2) : Set<'T> =
         match s1, s2 with
         | E, _ -> E
@@ -414,24 +424,13 @@ module Set =
                     intersection (l2, l),
                     intersection (r2, r))
 
-    //
-    let rec delete (set, x) : Set<'T> =
-        match set with
-        | E -> E
-        | T(v, _, l, r) ->
-            if lt (x, v) then
-                T' (v, delete (l, x), r)
-            elif lt (v, x) then
-                T' (v, l, delete (r, x))
-            else
-                delete' (l, r)
-
     let inline private cons (x, l) = x :: l
     
     //
-    let toList (set : Set<'T>) = fold (cons, [], set)
+    let toList (set : Set<'T>) =
+        fold (cons, [], set)
 
     //
-    let fromList l : Set<'T> =
-        (E, l) ||> List.fold (fun x y -> add (x, y))
+    let fromList list : Set<'T> =
+        List.fold (FuncConvert.FuncFromTupled add) E list
 
