@@ -29,7 +29,9 @@ limitations under the License.
 
 (*  This file has been heavily modified from the original version by Stephen Adams.
     The code was ported from Standard ML (SML) to F# as literally as possible to preserve
-    correctness. *)
+    correctness; after implementing some basic unit tests to check for correct behavior,
+    a number of small modifications were made to maximize the efficiency of the code
+    for running on the .NET CLR. *)
 
 (* Address:  Electronics & Computer Science
              University of Southampton
@@ -63,6 +65,13 @@ limitations under the License.
 
 namespace BBTrees
 
+[<AutoOpen>]
+module internal Constants =
+    /// Weight is a parameter to the rebalancing process.
+    let [<Literal>] weight = 3
+
+
+[<CompilationRepresentation(CompilationRepresentationFlags.UseNullAsTrueValue)>]
 type Set<'T when 'T : comparison> =
     | E
     | T of 'T * int * Set<'T> * Set<'T>
@@ -71,9 +80,6 @@ type Set<'T when 'T : comparison> =
 [<RequireQualifiedAccess; CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Set =
     (* Private members *)
-
-    /// Weight is a parameter to the rebalancing process.
-    let private weight = 3
 
     let inline private lt (x, y) = x < y
 
