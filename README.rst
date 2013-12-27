@@ -1,6 +1,9 @@
 BBTrees
 #######
 
+.. image:: https://travis-ci.org/jack-pappas/BBTrees.png  
+    :target: https://travis-ci.org/jack-pappas/BBTrees
+
 An F# implementation of weight-balanced binary trees.
 
 This code has been ported directly from Stephen Adams' Standard ML (SML) code accompanying
