@@ -432,6 +432,48 @@ module BBTree =
                     intersection r2 r)
 
     //
+    let rec iter action (set : BBTree<'T>) =
+        match set with
+        | E -> ()
+        | T (l, r, v, _) ->
+            // Iterate over the left subtree.
+            iter action l
+
+            // Apply the action to the value of the current node.
+            action v
+
+            // Iterate over the right subtree.
+            iter action r
+
+    //
+    let rec iterBack action (set : BBTree<'T>) =
+        match set with
+        | E -> ()
+        | T (l, r, v, _) ->
+            // Iterate over the right subtree.
+            iter action r
+
+            // Apply the action to the value of the current node.
+            action v
+
+            // Iterate over the left subtree.
+            iter action l
+
+    //
+    let rec fold folder (state : 'State) (set : BBTree<'T>) =
+        match set with
+        | E -> state
+        | T (l, r, v, _) ->
+            // Fold over the left subtree.
+            let state = fold folder state l
+
+            // Apply the folder to the value of the current node.
+            let state = folder state v
+
+            // Fold over the right subtree.
+            fold folder state r
+
+    //
     let rec foldBack folder (set : BBTree<'T>) (state : 'State) =
         match set with
         | E -> state
