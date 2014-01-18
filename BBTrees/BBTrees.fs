@@ -1,14 +1,4 @@
 ﻿(*
-    Copyright 1992-1996 Stephen Adams.
-
-    This software may be used freely provided that:
-      1. This copyright notice is attached to any copy, derived work,
-         or work including all or part of this software.
-      2. Any derived work must contain a prominent notice stating that
-         it has been altered from the original.
-
-*)
-(*
 
 Copyright 1992-1996 Stephen Adams
 Copyright 2013 Jack Pappas
@@ -26,13 +16,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 *)
+(*
+    Copyright 1992-1996 Stephen Adams.
 
-(*  This file has been heavily modified from the original version by Stephen Adams.
-    The code was ported from Standard ML (SML) to F# as literally as possible to preserve
-    correctness; after implementing some basic unit tests to check for correct behavior,
-    a number of small modifications were made to maximize the efficiency of the code
-    for running on the .NET CLR. *)
+    This software may be used freely provided that:
+      1. This copyright notice is attached to any copy, derived work,
+         or work including all or part of this software.
+      2. Any derived work must contain a prominent notice stating that
+         it has been altered from the original.
 
+*)
 (* Address:  Electronics & Computer Science
              University of Southampton
          Southampton  SO9 5NH
@@ -62,133 +55,144 @@ limitations under the License.
          union by replacing the split_lt(gt) operations with a lazy
          version. The `obvious' version is called old_union.
 *)
+(*  This file has been heavily modified from the original version by Stephen Adams.
+    The code was ported from Standard ML (SML) to F# with few changes; it was then modified
+    to more closely adhere to "canonical" F# coding style and naming conventions,
+    and to acheive better performance on the .NET CLR.  *)
 
 namespace BBTrees
+
 
 [<AutoOpen>]
 module internal Constants =
     /// Weight is a parameter to the rebalancing process.
-    let [<Literal>] weight = 3
+    let [<Literal>] weight = 3u
 
 
 [<CompilationRepresentation(CompilationRepresentationFlags.UseNullAsTrueValue)>]
-type Set<'T when 'T : comparison> =
+type BBTree<'T when 'T : comparison> =
     /// Empty set.
     | E
     /// Node.
-    | T of 'T * int * Set<'T> * Set<'T>
+    // Left-Child * Right-Child * Value * Size
+    | T of BBTree<'T> * BBTree<'T> * 'T * uint32
 
 //
 [<RequireQualifiedAccess; CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
-module Set =
+module BBTree =
     /// The empty set.
-    let empty<'T when 'T : comparison> : Set<'T> = E
+    let empty<'T when 'T : comparison> : BBTree<'T> = E
 
     /// Creates a new set containing the given value.
-    let singleton x : Set<'T> =
-        T (x, 1, E, E)
+    let singleton x : BBTree<'T> =
+        T (E, E, x, 1u)
 
     /// Returns the number of elements in the set.
-    let count (set : Set<'T>) =
+    let count (set : BBTree<'T>) =
         match set with
-        | E -> 0
-        | T (_,n,_,_) -> n
+        | E -> 0u
+        | T (_,_,_,n) -> n
 
     // NOTE : This function was originally called 'member' but the name
     // was changed since that's a keyword (reserved identifier) in F#.
     /// Tests whether the set contains the given value.
-    let rec contains (x, set : Set<'T>) : bool =
+    let rec contains x (set : BBTree<'T>) : bool =
         match set with
         | E -> false
-        | T (v, _, l, r) ->
-            if x < v then
-                contains (x, l)
-            elif x > v then
-                contains (x, r)
-            else true
+        | T (l, r, v, _) ->
+            let c = compare x v
+            if c < 0 then
+                // x < v
+                contains x l
+            elif c = 0 then
+                // x = v
+                true
+            else
+                // x > v
+                contains x r
 
     (*fun N(v,l,r) = T(v,1+size(l)+size(r),l,r)*)
     /// This is the smart constructor for T that ensures that the size of the tree is
     /// maintained correctly. The tree (v,l,r) must already be balanced.
-    let private N (value : 'T, l, r) : Set<'T> =
+    let private N (value : 'T, l, r) : BBTree<'T> =
         match l, r with
         | E, E ->
-            T (value, 1, E, E)
-        | E, (T (_,n,_,_) as r) ->
-            T (value, n+1, E, r)
-        | (T (_,n,_,_) as l), E ->
-            T (value, n+1, l, E)
-        | (T (_,n,_,_) as l), (T (_,m,_,_) as r) ->
-            T (value, n+m+1, l, r)
+            T (E, E, value, 1u)
+        | E, T (_,_,_,n) ->
+            T ( E, r, value, n + 1u)
+        | T (_,_,_,n), E ->
+            T (l, E, value, n + 1u)
+        | T (_,_,_,n), T (_,_,_,m) ->
+            T (l, r, value, n + m + 1u)
 
     /// Single left-rotation.
-    let inline private single_L (a, x, T(b,_,y,z)) =
-        N (b, N (a,x,y), z)
+    let inline private single_L (a, x, T (y, z, b, _)) : BBTree<'T> =
+        N (b, N (a, x, y), z)
 
     /// Single right-rotation.
-    let inline private single_R (b, T(a,_,x,y), z) =
-        N (a, x, N(b,y,z))
+    let inline private single_R (b, T (x, y, a, _), z) : BBTree<'T> =
+        N (a, x, N (b, y, z))
 
     /// Double left-rotation.
-    let inline private double_L (a, w, T(c,_, T(b,_,x,y), z)) =
-        N (b, N(a,w,x), N(c,y,z))
+    let inline private double_L (a, w, T (T (x, y, b, _), z, c, _)) : BBTree<'T> =
+        N (b, N (a, w, x), N (c, y, z))
 
     /// Double right-rotation.
-    let inline private double_R (c, T(a,_,w, T(b,_,x,y)), z) =
-        N (b, N (a,w,x), N (c,y,z))
+    let inline private double_R (c, T (w, T (x, y, b, _), a, _), z) : BBTree<'T> =
+        N (b, N (a, w, x), N (c, y, z))
 
     /// T' is used when the original tree was in balance and one of l or r has
     /// changed in size by at most one element, as in insertion or deletion of
     /// a single element.
-    let private T' (value : 'T, l, r) : Set<'T> =
+    let private T' (value : 'T, l, r) : BBTree<'T> =
         match l, r with
         | E, E ->
-            T (value, 1, E, E)
-        | E, T (_,_,E,E) ->
-            T (value, 2, E, r)
-        | T (_,_,E,E), E ->
-            T (value, 2, l, E)
-        | E, T (_,_, T(_,_,_,_), E) ->
+            T (E, E, value, 1u)
+        | E, T (E, E, _, _) ->
+            T (E, r, value, 2u)
+        | T (E, E, _,_), E ->
+            T (l, E,value, 2u)
+        | E, T (T (_,_,_,_), E, _, _) ->
             double_L (value, l, r)
-        | T (_,_, E, T(_,_,_,_)), E ->
+        | T (E, T (_,_,_,_), _, _), E ->
             double_R (value, l, r)
 
         (* these cases almost never happen with small weight *)
-        | E, T (_,_, T(_,ln,_,_), T(_,rn,_,_)) ->
+        | E, T (T (_,_,_,ln), T (_,_,_,rn), _, _) ->
             if ln < rn then single_L (value, l, r)
             else double_L (value, l, r)
 
-        | T (_,_, T(_,ln,_,_), T(_,rn,_,_)), E ->
+        | T (T (_,_,_,ln), T (_,_,_,rn), _, _), E ->
             if ln > rn then single_R (value, l, r)
             else double_R (value, l, r)
 
-        | E, T (_,_,E,_) ->
+        | E, T (E,_,_,_) ->
             single_L (value, l, r)
-        | T (_,_,_,E), E ->
+        | T (_,E,_,_), E ->
             single_R (value, l, r)
 
-        | T (lv, ln, ll, lr), T (rv, rn, rl, rr) ->
-            if rn >= weight * ln then (*right is too big*)
+        | T (ll, lr, _, ln), T (rl, rr, _, rn) ->
+            if rn >= weight * ln then (* right is too big *)
                 if count rl < count rr then
                     single_L (value, l, r)
                 else
                     double_L (value, l, r)
             
-            elif ln >= weight * rn then  (*left is too big*)
+            elif ln >= weight * rn then  (* left is too big *)
                 if count lr < count ll then
                     single_R (value, l, r)
                 else
                     double_R (value, l, r)
             else
-                T (value, ln+rn+1, l, r)
+                T (l, r, value, ln + rn + 1u)
 
     //
-    let rec private min (set : Set<'T>) =
+    let rec minElement (set : BBTree<'T>) =
         match set with
         | E ->
             invalidArg "set" "The set is empty"
-        | T (v, _, E, _) -> v
-        | T (_, _, l, _) -> min l
+        | T (E, _, v, _) -> v
+        | T (l, _, _, _) -> minElement l
 
     //
     let rec private delete' (l, r) =
@@ -196,52 +200,69 @@ module Set =
         | E, r -> r
         | l, E -> l
         | l, r ->
-            T' (min r, l, delmin r)
+            T' (minElement r, l, delmin r)
 
     //
-    and private delmin (set : Set<'T>) =
+    and private delmin (set : BBTree<'T>) =
         match set with
         | E ->
             invalidArg "set" "The set is empty."
-        | T (_, _, E, r) -> r
-        | T (v, _, l, r) ->
+        | T (E, r, _, _) -> r
+        | T (l, r, v, _) ->
             T' (v, delmin l, r)
 
     /// Adds an element to the given set, returning a new set.
     /// No exception is raised if the set already contains the element.
-    let rec add (set, x) : Set<'T> =
+    let rec add x (set : BBTree<'T>) =
         match set with
         | E ->
-            T (x, 1, E, E)
-        | T (v, _, l, r) ->
+            T (E, E, x, 1u)
+        | T (l, r, v, _) ->
             if x < v then
-                T' (v, add (l, x), r)
+                T' (v, add x l, r)
             elif x > v then
-                T' (v, l, add (r, x))
+                T' (v, l, add x r)
             else set
 
     /// Removes an element from the given set, returning a new set.
     /// No exception is raised if the set does not contain the element.
-    let rec delete (set, x) : Set<'T> =
+    let rec remove x set : BBTree<'T> =
         match set with
         | E -> E
-        | T(v, _, l, r) ->
-            if x < v then
-                T' (v, delete (l, x), r)
-            elif x > v then
-                T' (v, l, delete (r, x))
-            else
+        | T(l, r, v, _) ->
+            let c = compare x v
+            if c < 0 then
+                // x < v
+                T' (v, remove x l, r)
+            elif c = 0 then
+                // x = v
                 delete' (l, r)
+            else
+                // x > v
+                T' (v, l, remove x r)
+
+    //
+    let rec private concat (s1, s2) : BBTree<'T> =
+        match s1, s2 with
+        | E, _ -> s2
+        | _, E -> s1
+        | T (l1, r1, v1, n1), T (l2, r2, v2, n2) ->
+            if weight * n1 < n2 then
+                T' (v2, concat (s1, l2), r2)
+            elif weight * n2 < n1 then
+                T' (v1, l1, concat (r1, s2))
+            else
+                T' (minElement s2, s1, delmin s2)
 
     /// concat3 can join trees of arbitrary sizes. As with the other constructors,
     /// 'value' must be greater than every element in l and less than every element in r.
-    let rec private concat3 (l, value, r) : Set<'T> =
+    let rec private concat3 (l, value, r) : BBTree<'T> =
         match l, r with
-        | E, r ->
-            add (r, value)
-        | l, E ->
-            add (l, value)
-        | T (v1, n1, l1, r1), T (v2, n2, l2, r2) ->
+        | E, _ ->
+            add value r
+        | _, E ->
+            add value l
+        | T (l1, r1, v1, n1), T (l2, r2, v2, n2) ->
             if weight * n1 < n2 then
                 T' (v2, concat3 (l, value, l2), r2)
             elif weight * n2 < n1 then
@@ -250,187 +271,191 @@ module Set =
                 N (value, l, r)
 
     //
-    let rec private split_lt (set, x) =
+    let rec private split_lt x set =
         match set with
         | E -> E
-        | T (v, _, l, r) ->
-            if x < v then
-                split_lt (l, x)
-            elif x > v then
-                concat3 (l, v, split_lt (r, x))
-            else l
-
-    //
-    let rec private split_gt (set, x) =
-        match set with
-        | E -> E
-        | T (v, _, l, r) ->
-            if v < x then
-                split_gt (r, x)
-            elif v > x then
-                concat3 (split_gt (l, x), v, r)
-            else r
-
-    //
-    let rec private concat (s1, s2) : Set<'T> =
-        match s1, s2 with
-        | E, s2 -> s2
-        | s1, E -> s1
-        | T (v1, n1, l1, r1), T (v2, n2, l2, r2) ->
-            if weight * n1 < n2 then
-                T' (v2, concat (s1, l2), r2)
-            elif weight * n2 < n1 then
-                T' (v1, l1, concat (r1, s2))
+        | T (l, r, v, _) ->
+            let c = compare x v
+            if c < 0 then
+                // x < v
+                split_lt x l
+            elif c = 0 then
+                // x = v
+                l
             else
-                T' (min s2, s1, delmin s2)
+                // x > v
+                concat3 (l, v, split_lt x r)
 
     //
-    let private fold (f, state, set : Set<'T>) =
-        let rec fold' (state, set) =
-            match set with
-            | E -> state
-            | T (v, _, l, r) ->
-                fold' (f (v, fold' (state, r)), l)
-        fold' (state, set)
-
-    //
-    let rec private trim (lo, hi, s) : Set<'T> =
-        match s with
+    let rec private split_gt x set =
+        match set with
         | E -> E
-        | T (v, _, l, r) ->
+        | T (l, r, v, _) ->
+            let c = compare v x
+            if c < 0 then
+                // v < x
+                split_gt x r
+            elif c = 0 then
+                // v = x
+                r
+            else
+                // v > x
+                concat3 (split_gt x l, v, r)
+
+    //
+    let rec private trim (lo, hi, set) : BBTree<'T> =
+        match set with
+        | E -> E
+        | T (l, r, v, _) ->
             if lo < v then
-                if v < hi then s
+                if v < hi then set
                 else trim (lo, hi, l)
             else trim (lo, hi, r)
 
     //
-    let rec private uni_bd (s1, s2, lo, hi) : Set<'T> =
+    let rec private uni_bd (s1, s2, lo, hi) : BBTree<'T> =
         match s1, s2 with
-        | s1, E -> s1
-        | E, T (v, _, l, r) -> 
+        | _, E -> s1
+        | E, T (l, r, v, _) -> 
             concat3 (
-                split_gt (l, lo),
+                split_gt lo l,
                 v,
-                split_lt (r, hi))
+                split_lt hi r)
 
-        | T (v, _, l1, r1), T (v2, _, l2, r2) ->
+        | T (l1, r1, v1, _), T (_,_,_,_) ->
+            (* invariant:  lo < v1 < hi *)
             concat3(
-                uni_bd (l1, trim (lo, v, s2), lo, v),
-                v, 
-                uni_bd (r1, trim (v, hi, s2), v, hi))
-              (* inv:  lo < v < hi *)
+                uni_bd (l1, trim (lo, v1, s2), lo, v1),
+                v1, 
+                uni_bd (r1, trim (v1, hi, s2), v1, hi))
 
-               (*all the other versions of uni and trim are
-               specializations of the above two functions with
-               lo=-infinity and/or hi=+infinity *)
+            (* all the other versions of uni and trim are specializations of the above two functions with:
+                lo = -infinity and/or hi = +infinity *)
 
     //
-    let rec private trim_lo (lo, set) : Set<'T> =
+    let rec private trim_lo (lo, set) : BBTree<'T> =
         match set with
         | E -> E
-        | T (v, _, _, r) ->
+        | T (_, r, v, _) ->
             if lo < v then set
             else trim_lo (lo, r)
 
     //
-    let rec private trim_hi (hi, set) : Set<'T> =
+    let rec private trim_hi (hi, set) : BBTree<'T> =
         match set with
         | E -> E
-        | T (v, _, l, _) ->
+        | T (l, _, v, _) ->
             if v < hi then set
             else trim_hi (hi, l)
 
     //
-    let rec private uni_hi (s1, s2, hi) : Set<'T> =
+    let rec private uni_hi (s1, s2, hi) : BBTree<'T> =
         match s1, s2 with
-        | s1, E -> s1
-        | E, T (v, _, l, r) ->
-            concat3 (l, v, split_lt (r, hi))
-        | T (v, _, l1, r1), T (v2, _, l2, r2) ->
-            concat3(
-                uni_hi (l1, trim_hi (v, s2), v),
-                v, 
-                uni_bd (r1, trim (v, hi, s2), v, hi))
+        | _, E -> s1
+        | E, T (l, r, v, _) ->
+            concat3 (l, v, split_lt hi r)
+        | T (l1, r1, v1, _), T (_,_,_,_) ->
+            concat3 (
+                uni_hi (l1, trim_hi (v1, s2), v1),
+                v1, 
+                uni_bd (r1, trim (v1, hi, s2), v1, hi))
 
     //
-    let rec private uni_lo (s1, s2, lo) : Set<'T> =
+    let rec private uni_lo (s1, s2, lo) : BBTree<'T> =
         match s1, s2 with
-        | s1, E -> s1
-        | E, T (v, _, l, r) ->
-            concat3 (split_gt (l, lo), v, r)
-        | T (v, _, l1, r1), T (v2, _, l2, r2) ->
-            concat3(
+        | _, E -> s1
+        | E, T (l, r, v, _) ->
+            concat3 (split_gt lo l, v, r)
+        | T (l1, r1, v, _), T (_,_,_,_) ->
+            concat3 (
                 uni_bd (l1, trim (lo, v, s2), lo, v),
                 v, 
                 uni_lo (r1, trim_lo (v, s2), v))
 
-    //
-    let hedge_union (s1, s2) : Set<'T> =
+    /// Computes the union of two sets.
+    // NOTE : This is the 'hedge_union' algorithm specified in the original paper.
+    let union s1 s2 : BBTree<'T> =
         match s1, s2 with
         | s1, E -> s1
         | E, T (_,_,_,_) -> s2
-        | T (v, _, l1, r1), T (v2, _, l2, r2) ->
-            concat3(
+        | T (l1, r1, v, _), T (_,_,_,_) ->
+            concat3 (
                 uni_hi (l1, trim_hi (v, s2), v),
                 v, 
                 uni_lo (r1, trim_lo (v, s2), v))
 
-    (* The old_union version is about 20% slower than hedge_union in most cases *)
-    let rec old_union (s1, s2) : Set<'T> =
+    /// Computes the union of two sets.
+    // NOTE : This is the 'old_union' algorithm specified in the original paper.
+    // In most cases, the old_union version is about 20% slower than hedge_union.
+    //[<System.Obsolete("Use the 'union' function instead - it is implemented using a more efficient algorithm.")>]
+    let rec unionOld s1 s2 : BBTree<'T> =
         match s1, s2 with
-        | E, s2 -> s2
-        | s1, E -> s1
-        | T (v, _, l, r), s2 ->
-            let l2 = split_lt (s2, v)
-            let r2 = split_gt (s2, v)
-            concat3(
-                old_union (l, l2),
+        | E, _ -> s2
+        | _, E -> s1
+        | T (l, r, v, _), _ ->
+            let l2 = split_lt v s2
+            let r2 = split_gt v s2
+            concat3 (
+                unionOld l l2,
                 v,
-                old_union (r, r2))
-
-    /// Computes the union of the two sets.
-    let inline union (s1, s2) : Set<'T> =
-        //old_union (s1, s2)
-        hedge_union (s1, s2)
+                unionOld r r2)
 
     /// Removes the elements of the second set from the first.
-    let rec difference (s1, s2) : Set<'T> =
+    let rec difference s1 s2 : BBTree<'T> =
         match s1, s2 with
         | E, _ -> E
-        | s1, E -> s1
-        | s1, T (v, _, l, r) ->
-            let l2 = split_lt (s1, v)
-            let r2 = split_gt (s1, v)
+        | _, E -> s1
+        | _, T (l, r, v, _) ->
+            let l2 = split_lt v s1
+            let r2 = split_gt v s1
             concat (
-                difference (l2, l),
-                difference (r2, r))
+                difference l2 l,
+                difference r2 r)
 
     /// Computes the intersection of the two sets.
-    let rec intersection (s1, s2) : Set<'T> =
+    let rec intersection s1 s2 : BBTree<'T> =
         match s1, s2 with
         | E, _ -> E
         | _, E -> E
-        | s1, T (v, _, l, r) ->
-            let l2 = split_lt (s1, v)
-            let r2 = split_gt (s1, v)
+        | _, T (l, r, v, _) ->
+            let l2 = split_lt v s1
+            let r2 = split_gt v s1
         
-            if contains (v, s1) then
+            if contains v s1 then
                 concat3 (
-                    intersection (l2, l),
+                    intersection l2 l,
                     v,
-                    intersection (r2, r))
+                    intersection r2 r)
             else
                 concat (
-                    intersection (l2, l),
-                    intersection (r2, r))
+                    intersection l2 l,
+                    intersection r2 r)
 
-    let inline private cons (x, l) = x :: l
+    //
+    let rec foldBack folder (set : BBTree<'T>) (state : 'State) =
+        match set with
+        | E -> state
+        | T (l, r, v, _) ->
+            // Fold over the right subtree.
+            let state = foldBack folder r state
+
+            // Apply the folder to the value of the current node.
+            let state = folder v state
+
+            // Fold over the left subtree.
+            foldBack folder l state
+
+    let inline private cons x l = x :: l
+
+    let inline private flip f x y = f y x
     
     //
-    let toList (set : Set<'T>) =
-        fold (cons, [], set)
+    let toList (set : BBTree<'T>) =
+        // Fold backwards over the tree, so the resulting list is ordered from least-to-greatest
+        // without having to reverse the list at the end.
+        foldBack cons set []
 
     //
-    let fromList list : Set<'T> =
-        List.fold (FuncConvert.FuncFromTupled add) E list
+    let fromList list : BBTree<'T> =
+        (E, list) ||> List.fold (flip add)
 

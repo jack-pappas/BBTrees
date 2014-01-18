@@ -22,50 +22,88 @@ open BBTrees
 open NUnit.Framework
 
 
+//
+[<RequireQualifiedAccess>]
+module private Data =
+    let fibs () =
+        BBTree.empty
+        |> BBTree.add 1
+        |> BBTree.add 1
+        |> BBTree.add 2
+        |> BBTree.add 3
+        |> BBTree.add 5
+        |> BBTree.add 8
+
+    let primes () =
+        BBTree.empty
+        |> BBTree.add 2
+        |> BBTree.add 3
+        |> BBTree.add 5
+        |> BBTree.add 7
+        |> BBTree.add 11
+        |> BBTree.add 13
+        |> BBTree.add 17
+        |> BBTree.add 19
+
+
 [<Test>]
-let basic () : unit =
-    let add value set =
-        Set.add (set, value)
+let count () : unit =
+    let fibs = Data.fibs ()
+    Assert.AreEqual (5, BBTree.count fibs)
 
-    //
-    let fibs =
-        Set.empty
-        |> add 1
-        |> add 1
-        |> add 2
-        |> add 3
-        |> add 5
-        |> add 8
+    let primes = Data.primes ()
+    Assert.AreEqual (8, BBTree.count primes)
 
-    //
-    let primes =
-        Set.empty
-        |> add 2
-        |> add 3
-        |> add 5
-        |> add 7
-        |> add 11
-        |> add 13
-        |> add 17
-        |> add 19
+[<Test>]
+let intersection () : unit =
+    let fibs = Data.fibs ()
+    let primes = Data.primes ()
 
-    Assert.AreEqual (5, Set.count fibs)
-    Assert.AreEqual (8, Set.count primes)
+    let intersect_fibs_primes = BBTree.intersection fibs primes
+    Assert.AreEqual (3, BBTree.count intersect_fibs_primes)
 
-    let intersect_fibs_primes = Set.intersection (fibs, primes)
-    Assert.AreEqual (3, Set.count intersect_fibs_primes)
+[<Test>]
+let union () : unit =
+    let fibs = Data.fibs ()
+    let primes = Data.primes ()
 
-    let union_fibs_primes = Set.hedge_union (fibs, primes)
-    Assert.AreEqual (10, Set.count union_fibs_primes)
+    let union_fibs_primes = BBTree.union fibs primes
+    Assert.AreEqual (10, BBTree.count union_fibs_primes)
 
-    let diff_primes_fibs = Set.difference (primes, fibs)
-    Assert.AreEqual (5, Set.count diff_primes_fibs)
+[<Test>]
+let unionOld () : unit =
+    let fibs = Data.fibs ()
+    let primes = Data.primes ()
 
+    let unionOld_fibs_primes = BBTree.unionOld fibs primes
+    Assert.AreEqual (10, BBTree.count unionOld_fibs_primes)
+
+[<Test>]
+let difference () : unit =
+    let fibs = Data.fibs ()
+    let primes = Data.primes ()
+
+    let diff_primes_fibs = BBTree.difference primes fibs
+    Assert.AreEqual (5, BBTree.count diff_primes_fibs)
 
 
 (* Randomized tests *)
 
-// TODO : Implement some randomized tests with QuickCheck which generate random lists,
+// TODO : Implement some randomized tests with FsCheck which generate random lists,
 //        create both an F# set and a BBTree from the list, convert them back to lists,
 //        and compare them for equality. The tests should also perform some set-based
 //        operations to make sure they work correctly.
+
+
+// TODO : Re-implement this test with FsCheck so we can test many random cases
+[<Test>]
+let ``union and unionOld produce the same results`` () : unit =
+    let fibs = Data.fibs ()
+    let primes = Data.primes ()
+
+    let union_fibs_primes = BBTree.union fibs primes
+    let unionOld_fibs_primes = BBTree.unionOld fibs primes
+    Assert.AreEqual (
+        BBTree.toList union_fibs_primes,
+        BBTree.toList unionOld_fibs_primes)
+
